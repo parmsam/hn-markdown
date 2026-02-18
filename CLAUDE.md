@@ -12,17 +12,20 @@ Uses `contextkit` to pull HN pages as Markdown, extracts article titles/URLs/dom
 cc-hackernews/
 ├── CLAUDE.md                  # This file
 ├── INTERESTS.md               # User interests for post recommendations
-├── hackernews_scrape.py       # Core scraping logic
+├── hn.py                      # Core scraping logic
+├── articles.py                # Article URL lookup + save helper
 └── output/
     ├── main/                  # Live front page snapshots
     │   ├── hackernews_main_YYYY-MM-DD.md
     │   └── hackernews_main_YYYY-MM-DD_compact.md
-    └── front/                 # Daily archive (front page by date)
-        ├── hackernews_front_YYYY-MM-DD.md
-        └── hackernews_front_YYYY-MM-DD_compact.md
+    ├── front/                 # Daily archive (front page by date)
+    │   ├── hackernews_front_YYYY-MM-DD.md
+    │   └── hackernews_front_YYYY-MM-DD_compact.md
+    └── articles/              # Individual pulled articles
+        └── YYYY-MM-DD_NN_article-title-slug.md
 ```
 
-## Key file: `hackernews_scrape.py`
+## Key file: `hn.py`
 
 | Function | Purpose |
 |---|---|
@@ -45,7 +48,7 @@ cc-hackernews/
 ## Usage
 
 ```python
-from hackernews_scrape import save_hn_to_markdown
+from hn import save_hn_to_markdown
 
 # Snapshot of today's live front page (full format)
 filepath, count = save_hn_to_markdown(page_type='main')
@@ -95,19 +98,87 @@ Both start with the shared metadata header:
 ## Dependencies
 
 - `contextkit` — wraps web pages as Markdown (`contextkit.read.read_link`)
-- Standard library: `re`, `os`, `datetime`
+- Standard library: `re`, `os`, `datetime`, `glob`, `argparse`
+
+## Key file: `articles.py`
+
+| Function | Purpose |
+|---|---|
+| `get_latest_hn_file(page_type)` | Returns the most recently modified full-format output file for a page type |
+| `get_article(n, page_type, filepath)` | Returns `(title, url, domain)` for article number n; handles both full and compact formats |
+| `article_filepath(n, title, date_str)` | Returns the output path for a saved article (`output/articles/YYYY-MM-DD_NN_slug.md`) |
+| `build_article_header(title, url, domain, n)` | Returns the markdown metadata header to prepend to saved article content |
+| `open_in_browser(url)` | Opens a URL in the default browser via `open` (macOS) |
+
+CLI usage:
+
+```bash
+python3 articles.py 3              # look up article 3 from output/main/
+python3 articles.py 3 --page front # look up from output/front/
+python3 articles.py 3 --file path/to/file.md
+```
 
 ## Pulling articles
 
 When the user says "pull N" (where N is an article number from the list):
 
 - `pull N` — ask whether they want a summary, full read, just the URL, or to open in browser
-- `pull N summary` — fetch and summarize the article
-- `pull N read` — fetch and display the full article content in the terminal
-- `pull N url` — return just the URL
-- `pull N open` — open the article in the default browser via `open <url>` (macOS)
+- `pull N summary` — resolve the URL via `articles.py`, then use a **Task subagent** to fetch and summarize
+- `pull N read` — resolve the URL via `articles.py`, then use a **Task subagent** to fetch and display the full content
+- `pull N url` — run `python3 articles.py N` and return just the URL line
+- `pull N open` — resolve the URL and run `open <url>` (macOS)
 
-Use `WebFetch` to retrieve the content. If the site blocks fetching, say so and provide the URL so the user can open it directly.
+### Why subagents for summary/read
+
+Raw article content is 5,000–30,000+ tokens. Running a Task subagent keeps that content out of the main context — only the summary or processed output (~200–500 tokens) is returned here. Always use subagents for `summary` and `read` operations.
+
+### Subagent prompt template for summaries
+
+Before launching the subagent, resolve the article metadata with Bash:
+
+```bash
+python3 articles.py <N>
+# outputs: Title, URL, Domain
+```
+
+Then get the save path:
+
+```bash
+python3 -c "
+from articles import article_filepath, build_article_header
+title = '<TITLE>'
+url   = '<URL>'
+domain = '<DOMAIN>'
+n = <N>
+path = article_filepath(n, title)
+header = build_article_header(title, url, domain, n)
+print('PATH:', path)
+print('---HEADER---')
+print(header)
+"
+```
+
+Then launch a Task subagent with this prompt:
+
+```
+Fetch the article at <URL> using WebFetch.
+
+Save the full content as a markdown file at: <FILEPATH>
+Prepend exactly this header before the article content:
+
+<HEADER>
+
+After saving, write a concise summary (4–6 sentences) covering:
+- What the article is about
+- Key argument or finding
+- Why it's relevant or interesting
+
+Return only the summary and the saved filepath — no other preamble.
+
+If the site blocks WebFetch, return: "Blocked: <URL>"
+```
+
+If the site blocks fetching, say so and provide the URL so the user can open it directly.
 
 ## Recommendations
 
