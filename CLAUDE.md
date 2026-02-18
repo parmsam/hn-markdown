@@ -11,6 +11,7 @@ Uses `contextkit` to pull HN pages as Markdown, extracts article titles/URLs/dom
 ```
 cc-hackernews/
 ├── CLAUDE.md                  # This file
+├── INTERESTS.md               # User interests for post recommendations
 ├── hackernews_scrape.py       # Core scraping logic
 └── output/
     ├── main/                  # Live front page snapshots
@@ -107,6 +108,10 @@ When the user says "pull N" (where N is an article number from the list):
 - `pull N open` — open the article in the default browser via `open <url>` (macOS)
 
 Use `WebFetch` to retrieve the content. If the site blocks fetching, say so and provide the URL so the user can open it directly.
+
+## Recommendations
+
+When the user asks for recommendations or "what's interesting", consult `INTERESTS.md` and cross-reference it against the current article list to surface the most relevant posts. Briefly explain why each pick matches their interests.
 
 ## Adding new page types
 
